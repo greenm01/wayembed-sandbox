@@ -558,73 +558,83 @@ proc runClapOrderSmoke(): int =
   echo &"token={handoff.format_token} calls={calls.join(\" -> \" )}"
   0
 
-proc runClapCPluginSmoke(): int =
+proc runAdapterCPluginSmoke(
+    adapterFormat: uint32, expectedToken: string, label: string, failBase: int
+): int =
   resetCounters()
   var scenario = Scenario(attachStatus: WayembedEmbedStatusInvalidArgument)
   try:
     scenario.host = openHostSurface(420, 220)
   except CatchableError as e:
-    return fail(100, e.msg)
+    return fail(failBase, e.msg)
   defer:
     closeHostSurface(scenario.host)
 
   var hostIface = makeWaylandHostInterface(addr scenario)
   let server = wayembed_server_create(addr hostIface, nil)
   if server == nil:
-    return fail(101, "wayembed_server_create failed")
+    return fail(failBase + 1, "wayembed_server_create failed")
   defer:
     wayembed_server_destroy(server)
 
   let rawDisplay = wayembed_server_open_client_display(server)
   if rawDisplay == nil:
-    return fail(102, "open client display failed")
+    return fail(failBase + 2, "open client display failed")
   defer:
     discard wayembed_server_close_client_display(server, rawDisplay)
   let display = cast[ptr wlcommon.Display](rawDisplay)
   pumpWayembedClient(server, display, scenario.host)
   if connectedCount != 1 or lastClient == nil:
-    return fail(103, "plugin client did not connect")
+    return fail(failBase + 3, "plugin client did not connect")
 
   var handoff = WayembedAdapterHandoff(size: uint32(sizeof(WayembedAdapterHandoff)))
-  if not wayembed_adapter_handoff_init(
-    addr handoff, WayembedAdapterFormatClap, server, rawDisplay
-  ):
-    return fail(104, "CLAP handoff init failed")
+  if not wayembed_adapter_handoff_init(addr handoff, adapterFormat, server, rawDisplay):
+    return fail(failBase + 4, &"{label} handoff init failed")
   if not wayembed_adapter_handoff_validate(addr handoff):
-    return fail(105, "CLAP handoff validate failed")
-  if $handoff.format_token != WayembedAdapterClapExperimentalApi:
-    return fail(106, "unexpected CLAP token")
+    return fail(failBase + 5, &"{label} handoff validate failed")
+  if $handoff.format_token != expectedToken:
+    return fail(failBase + 6, &"unexpected {label} token")
 
   let fixture = wayembed_c_plugin_fixture_create(handoff.display)
   if fixture == nil:
-    return fail(107, "C plugin fixture create failed")
+    return fail(failBase + 7, "C plugin fixture create failed")
   defer:
     wayembed_c_plugin_fixture_destroy(fixture)
 
   pumpWayembedClient(server, display, scenario.host, 8)
   if not wayembed_c_plugin_fixture_globals_ready(fixture):
-    return fail(108, "C plugin fixture did not receive compositor and shm globals")
+    return fail(failBase + 8, "C plugin fixture did not receive compositor and shm globals")
 
   if not wayembed_c_plugin_fixture_commit_surface(fixture):
-    return fail(109, "C plugin fixture surface commit failed")
+    return fail(failBase + 9, "C plugin fixture surface commit failed")
   pumpWayembedClient(server, display, scenario.host, 10)
 
   if surfaceCreatedCount != 1:
-    return fail(110, "surface-created callback did not fire")
+    return fail(failBase + 10, "surface-created callback did not fire")
   if scenario.attachStatus != WayembedEmbedStatusOk or scenario.embed == nil:
-    return fail(111, &"embed attach failed with status {scenario.attachStatus}")
+    return fail(failBase + 11, &"embed attach failed with status {scenario.attachStatus}")
   if mappedCount != 1:
-    return fail(112, "embed mapped callback did not fire")
+    return fail(failBase + 12, "embed mapped callback did not fire")
   if wayembed_embed_resize(scenario.embed, 240, 132) != WayembedEmbedStatusOk:
-    return fail(113, "embed resize failed")
+    return fail(failBase + 13, "embed resize failed")
   wayembed_server_dispatch(server)
   if resizedCount != 1:
-    return fail(114, "embed resized callback did not fire")
+    return fail(failBase + 14, "embed resized callback did not fire")
 
   discard pumpHostSurface(scenario.host, 500)
-  echo "clap-c-plugin-smoke ok"
+  echo &"{label.toLowerAscii()}-c-plugin-smoke ok"
   echo &"token={handoff.format_token} callbacks: connected={connectedCount} surface_created={surfaceCreatedCount} mapped={mappedCount} resized={resizedCount}"
   0
+
+proc runClapCPluginSmoke(): int =
+  runAdapterCPluginSmoke(
+    WayembedAdapterFormatClap, WayembedAdapterClapExperimentalApi, "CLAP", 100
+  )
+
+proc runLv2CPluginSmoke(): int =
+  runAdapterCPluginSmoke(
+    WayembedAdapterFormatLv2, WayembedAdapterLv2ExperimentalUri, "LV2", 120
+  )
 
 proc runLv2OrderSmoke(): int =
   resetCounters()
@@ -678,7 +688,7 @@ proc runLv2OrderSmoke(): int =
 
 proc usage(): int =
   stderr.writeLine(
-    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|clap-order-smoke|clap-c-plugin-smoke|lv2-order-smoke>"
+    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|clap-order-smoke|clap-c-plugin-smoke|lv2-order-smoke|lv2-c-plugin-smoke>"
   )
   64
 
@@ -700,6 +710,8 @@ when isMainModule:
         runClapCPluginSmoke()
       of "lv2-order-smoke":
         runLv2OrderSmoke()
+      of "lv2-c-plugin-smoke":
+        runLv2CPluginSmoke()
       else:
         usage()
   quit code

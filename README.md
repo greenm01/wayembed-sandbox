@@ -37,14 +37,15 @@ bin/wayembed-sandbox embed-smoke
 bin/wayembed-sandbox clap-order-smoke
 bin/wayembed-sandbox clap-c-plugin-smoke
 bin/wayembed-sandbox lv2-order-smoke
+bin/wayembed-sandbox lv2-c-plugin-smoke
 ```
 
 `abi-smoke` checks the C ABI from Nim. `host-surface` opens a live Wayland
 parent window. `embed-smoke` creates one plugin surface and embeds it through
 wayembed. `clap-order-smoke` and `lv2-order-smoke` validate the experimental
 adapter handoff order without loading a real plugin. `clap-c-plugin-smoke`
-passes the CLAP handoff display into a tiny C plugin fixture and embeds the
-fixture-created surface.
+and `lv2-c-plugin-smoke` pass the adapter handoff display into a tiny C plugin
+fixture and embed the fixture-created surface.
 
 Before committing Nim changes, run the semantic check last:
 
