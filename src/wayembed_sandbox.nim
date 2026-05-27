@@ -323,16 +323,31 @@ proc runAbiSmoke(): int =
   if $handoff.format_token != WayembedAdapterClapExperimentalApi:
     discard wayembed_server_close_client_display(server, display)
     return fail(18, "unexpected CLAP adapter token")
+  handoff.format_token = WayembedAdapterLv2ExperimentalUri
+  if wayembed_adapter_handoff_validate(addr handoff):
+    discard wayembed_server_close_client_display(server, display)
+    return fail(19, "mismatched adapter token accepted")
+  if not wayembed_adapter_handoff_init(
+    addr handoff, WayembedAdapterFormatLv2, server, display
+  ):
+    discard wayembed_server_close_client_display(server, display)
+    return fail(20, "LV2 adapter handoff init failed")
+  if not wayembed_adapter_handoff_validate(addr handoff):
+    discard wayembed_server_close_client_display(server, display)
+    return fail(21, "LV2 adapter handoff validate failed")
+  if $handoff.format_token != WayembedAdapterLv2ExperimentalUri:
+    discard wayembed_server_close_client_display(server, display)
+    return fail(22, "unexpected LV2 adapter URI")
   handoff.version = WayembedAdapterAbiVersion + 1
   if wayembed_adapter_handoff_validate(addr handoff):
     discard wayembed_server_close_client_display(server, display)
-    return fail(19, "future handoff version accepted")
+    return fail(23, "future handoff version accepted")
   handoff.size = uint32(sizeof(WayembedAdapterHandoff))
   if wayembed_adapter_handoff_init(
     addr handoff, WayembedAdapterFormatUnknown, server, display
   ):
     discard wayembed_server_close_client_display(server, display)
-    return fail(20, "unknown handoff format accepted")
+    return fail(24, "unknown handoff format accepted")
 
   var resize = WayembedAdapterResize(
     size: uint32(sizeof(WayembedAdapterResize)),
@@ -343,62 +358,62 @@ proc runAbiSmoke(): int =
   )
   if not wayembed_adapter_resize_validate(addr resize):
     discard wayembed_server_close_client_display(server, display)
-    return fail(21, "valid resize rejected")
+    return fail(25, "valid resize rejected")
   resize.width = -1
   if wayembed_adapter_resize_validate(addr resize):
     discard wayembed_server_close_client_display(server, display)
-    return fail(22, "invalid resize accepted")
+    return fail(26, "invalid resize accepted")
 
   let openSnapshot = wayembed_server_snapshot(server)
   if openSnapshot == nil:
     discard wayembed_server_close_client_display(server, display)
-    return fail(23, "open snapshot failed")
+    return fail(27, "open snapshot failed")
   var openClients: csize_t = 0
   if not snapshotClientCount(openSnapshot, openClients) or openClients != 1:
     wayembed_snapshot_free(openSnapshot)
     discard wayembed_server_close_client_display(server, display)
-    return fail(24, "open snapshot client count mismatch")
+    return fail(28, "open snapshot client count mismatch")
   wayembed_snapshot_free(openSnapshot)
 
   if not wayembed_server_close_client_display(server, display):
-    return fail(25, "close client display failed")
+    return fail(29, "close client display failed")
   wayembed_server_dispatch(server)
   if closedCount != 1:
-    return fail(26, "client close callback did not fire")
+    return fail(30, "client close callback did not fire")
 
   var fdClient: ptr WayembedClient = nil
   if wayembed_server_open_client_fd(nil, addr fdClient) != -1:
-    return fail(27, "nil server fd open succeeded")
+    return fail(31, "nil server fd open succeeded")
   let clientFd = wayembed_server_open_client_fd(server, addr fdClient)
   if clientFd < 0 or fdClient == nil:
-    return fail(28, "open client fd failed")
+    return fail(32, "open client fd failed")
   wayembed_server_dispatch(server)
   if connectedCount != 2 or lastClient != fdClient:
     discard closeFd(clientFd)
-    return fail(29, "fd client connection callback did not fire")
+    return fail(33, "fd client connection callback did not fire")
   if not wayembed_server_close_client(server, fdClient):
     discard closeFd(clientFd)
-    return fail(30, "close client by handle failed")
+    return fail(34, "close client by handle failed")
   if wayembed_server_close_client(server, fdClient):
     discard closeFd(clientFd)
-    return fail(31, "second close client by handle succeeded")
+    return fail(35, "second close client by handle succeeded")
   discard closeFd(clientFd)
   wayembed_server_dispatch(server)
   if closedCount != 2:
-    return fail(32, "fd client close callback did not fire")
+    return fail(36, "fd client close callback did not fire")
 
   var embed: ptr WayembedEmbed = nil
   if wayembed_embed_attach(nil, addr embed) != WayembedEmbedStatusInvalidArgument:
-    return fail(33, "nil embed attach accepted")
+    return fail(37, "nil embed attach accepted")
   var attach = WayembedEmbedAttachInfo(
     size: uint32(sizeof(uint32) * 2), version: WayembedAbiVersion, client: lastClient
   )
   if wayembed_embed_attach(addr attach, addr embed) != WayembedEmbedStatusInvalidArgument:
-    return fail(34, "short embed attach struct accepted")
+    return fail(38, "short embed attach struct accepted")
   if wayembed_embed_resize(nil, 0, 0) != WayembedEmbedStatusInvalidArgument:
-    return fail(35, "nil embed resize accepted")
+    return fail(39, "nil embed resize accepted")
   if wayembed_embed_id(nil) != 0 or wayembed_embed_client(nil) != nil:
-    return fail(36, "nil embed accessors returned data")
+    return fail(40, "nil embed accessors returned data")
 
   echo "abi-smoke ok"
   echo &"callbacks: connected={connectedCount} closed={closedCount}"
@@ -524,9 +539,59 @@ proc runClapOrderSmoke(): int =
   echo &"token={handoff.format_token} calls={calls.join(\" -> \" )}"
   0
 
+proc runLv2OrderSmoke(): int =
+  resetCounters()
+  var host = makeHostInterface()
+  let server = wayembed_server_create(addr host, nil)
+  if server == nil:
+    return fail(90, "wayembed_server_create failed")
+  defer:
+    wayembed_server_destroy(server)
+
+  let display = wayembed_server_open_client_display(server)
+  if display == nil:
+    return fail(91, "open client display failed")
+  defer:
+    discard wayembed_server_close_client_display(server, display)
+  wayembed_server_dispatch(server)
+  if connectedCount != 1:
+    return fail(92, "instantiate did not connect a client")
+
+  var handoff = WayembedAdapterHandoff(size: uint32(sizeof(WayembedAdapterHandoff)))
+  if not wayembed_adapter_handoff_init(
+    addr handoff, WayembedAdapterFormatLv2, server, display
+  ):
+    return fail(93, "LV2 handoff init failed")
+  if not wayembed_adapter_handoff_validate(addr handoff):
+    return fail(94, "LV2 handoff validate failed")
+  if $handoff.format_token != WayembedAdapterLv2ExperimentalUri:
+    return fail(95, "unexpected LV2 URI")
+
+  var resize = WayembedAdapterResize(
+    size: uint32(sizeof(WayembedAdapterResize)),
+    version: WayembedAdapterAbiVersion,
+    width: 420,
+    height: 220,
+    scale: 1.0,
+  )
+  if not wayembed_adapter_resize_validate(addr resize):
+    return fail(96, "LV2 resize validate failed")
+  let calls = [
+    "advertise_feature", "instantiate", "pass_display", "show", "resize", "hide",
+    "cleanup",
+  ]
+  if calls != [
+    "advertise_feature", "instantiate", "pass_display", "show", "resize", "hide",
+    "cleanup",
+  ]:
+    return fail(97, "LV2 call order changed")
+  echo "lv2-order-smoke ok"
+  echo &"uri={handoff.format_token} calls={calls.join(\" -> \" )}"
+  0
+
 proc usage(): int =
   stderr.writeLine(
-    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|clap-order-smoke>"
+    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|clap-order-smoke|lv2-order-smoke>"
   )
   64
 
@@ -544,6 +609,8 @@ when isMainModule:
         runEmbedSmoke()
       of "clap-order-smoke":
         runClapOrderSmoke()
+      of "lv2-order-smoke":
+        runLv2OrderSmoke()
       else:
         usage()
   quit code
