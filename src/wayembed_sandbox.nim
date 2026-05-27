@@ -1,4 +1,6 @@
 {.passC: "-D_GNU_SOURCE".}
+{.passC: "-Ifixtures/c".}
+{.compile: "../fixtures/c/wayland_plugin_fixture.c".}
 
 import std/[os, strformat, strutils]
 
@@ -12,6 +14,8 @@ import bindings/wayembed_adapters
 import host/event_loop
 import host/wayland_host
 
+type CPluginFixture {.importc: "struct wayembed_c_plugin_fixture", incompleteStruct.} = object
+
 proc closeFd(fd: cint): cint {.importc: "close", header: "unistd.h".}
 proc memfd_create(name: cstring, flags: cuint): cint {.importc, header: "sys/mman.h".}
 proc ftruncate(fd: cint, length: clong): cint {.importc, header: "unistd.h".}
@@ -20,6 +24,21 @@ proc mmap(
 ): pointer {.importc, header: "sys/mman.h".}
 
 proc munmap(address: pointer, length: csize_t): cint {.importc, header: "sys/mman.h".}
+proc wayembed_c_plugin_fixture_create(
+  display: ptr WlDisplay
+): ptr CPluginFixture {.cdecl, importc, header: "wayland_plugin_fixture.h".}
+
+proc wayembed_c_plugin_fixture_destroy(
+  fixture: ptr CPluginFixture
+) {.cdecl, importc, header: "wayland_plugin_fixture.h".}
+
+proc wayembed_c_plugin_fixture_globals_ready(
+  fixture: ptr CPluginFixture
+): bool {.cdecl, importc, header: "wayland_plugin_fixture.h".}
+
+proc wayembed_c_plugin_fixture_commit_surface(
+  fixture: ptr CPluginFixture
+): bool {.cdecl, importc, header: "wayland_plugin_fixture.h".}
 
 const
   protRead = 1
@@ -539,6 +558,74 @@ proc runClapOrderSmoke(): int =
   echo &"token={handoff.format_token} calls={calls.join(\" -> \" )}"
   0
 
+proc runClapCPluginSmoke(): int =
+  resetCounters()
+  var scenario = Scenario(attachStatus: WayembedEmbedStatusInvalidArgument)
+  try:
+    scenario.host = openHostSurface(420, 220)
+  except CatchableError as e:
+    return fail(100, e.msg)
+  defer:
+    closeHostSurface(scenario.host)
+
+  var hostIface = makeWaylandHostInterface(addr scenario)
+  let server = wayembed_server_create(addr hostIface, nil)
+  if server == nil:
+    return fail(101, "wayembed_server_create failed")
+  defer:
+    wayembed_server_destroy(server)
+
+  let rawDisplay = wayembed_server_open_client_display(server)
+  if rawDisplay == nil:
+    return fail(102, "open client display failed")
+  defer:
+    discard wayembed_server_close_client_display(server, rawDisplay)
+  let display = cast[ptr wlcommon.Display](rawDisplay)
+  pumpWayembedClient(server, display, scenario.host)
+  if connectedCount != 1 or lastClient == nil:
+    return fail(103, "plugin client did not connect")
+
+  var handoff = WayembedAdapterHandoff(size: uint32(sizeof(WayembedAdapterHandoff)))
+  if not wayembed_adapter_handoff_init(
+    addr handoff, WayembedAdapterFormatClap, server, rawDisplay
+  ):
+    return fail(104, "CLAP handoff init failed")
+  if not wayembed_adapter_handoff_validate(addr handoff):
+    return fail(105, "CLAP handoff validate failed")
+  if $handoff.format_token != WayembedAdapterClapExperimentalApi:
+    return fail(106, "unexpected CLAP token")
+
+  let fixture = wayembed_c_plugin_fixture_create(handoff.display)
+  if fixture == nil:
+    return fail(107, "C plugin fixture create failed")
+  defer:
+    wayembed_c_plugin_fixture_destroy(fixture)
+
+  pumpWayembedClient(server, display, scenario.host, 8)
+  if not wayembed_c_plugin_fixture_globals_ready(fixture):
+    return fail(108, "C plugin fixture did not receive compositor and shm globals")
+
+  if not wayembed_c_plugin_fixture_commit_surface(fixture):
+    return fail(109, "C plugin fixture surface commit failed")
+  pumpWayembedClient(server, display, scenario.host, 10)
+
+  if surfaceCreatedCount != 1:
+    return fail(110, "surface-created callback did not fire")
+  if scenario.attachStatus != WayembedEmbedStatusOk or scenario.embed == nil:
+    return fail(111, &"embed attach failed with status {scenario.attachStatus}")
+  if mappedCount != 1:
+    return fail(112, "embed mapped callback did not fire")
+  if wayembed_embed_resize(scenario.embed, 240, 132) != WayembedEmbedStatusOk:
+    return fail(113, "embed resize failed")
+  wayembed_server_dispatch(server)
+  if resizedCount != 1:
+    return fail(114, "embed resized callback did not fire")
+
+  discard pumpHostSurface(scenario.host, 500)
+  echo "clap-c-plugin-smoke ok"
+  echo &"token={handoff.format_token} callbacks: connected={connectedCount} surface_created={surfaceCreatedCount} mapped={mappedCount} resized={resizedCount}"
+  0
+
 proc runLv2OrderSmoke(): int =
   resetCounters()
   var host = makeHostInterface()
@@ -591,7 +678,7 @@ proc runLv2OrderSmoke(): int =
 
 proc usage(): int =
   stderr.writeLine(
-    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|clap-order-smoke|lv2-order-smoke>"
+    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|clap-order-smoke|clap-c-plugin-smoke|lv2-order-smoke>"
   )
   64
 
@@ -609,6 +696,8 @@ when isMainModule:
         runEmbedSmoke()
       of "clap-order-smoke":
         runClapOrderSmoke()
+      of "clap-c-plugin-smoke":
+        runClapCPluginSmoke()
       of "lv2-order-smoke":
         runLv2OrderSmoke()
       else:
