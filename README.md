@@ -41,6 +41,7 @@ bin/wayembed-sandbox lv2-order-smoke
 bin/wayembed-sandbox lv2-c-plugin-smoke
 bin/wayembed-sandbox vst3-order-smoke
 bin/wayembed-sandbox vst3-c-plugin-smoke
+bin/wayembed-sandbox adapter-fd-c-plugin-smoke
 ```
 
 `abi-smoke` checks the C ABI from Nim. `host-surface` opens a live Wayland
@@ -50,7 +51,8 @@ client fd. `clap-order-smoke`, `lv2-order-smoke`, and `vst3-order-smoke`
 validate the experimental adapter handoff order without loading a real plugin.
 `clap-c-plugin-smoke`, `lv2-c-plugin-smoke`, and `vst3-c-plugin-smoke` pass the
 adapter handoff display into a tiny C plugin fixture and embed the
-fixture-created surface.
+fixture-created surface. `adapter-fd-c-plugin-smoke` repeats that fixture path
+through fd-backed CLAP, LV2, and VST3 handoffs.
 
 Before committing Nim changes, run the semantic check last:
 

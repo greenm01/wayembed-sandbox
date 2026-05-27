@@ -22,6 +22,18 @@ type
     format_token*: cstring
     format_userdata*: pointer
 
+  WayembedAdapterFdHandoff* {.
+    importc: "wayembed_adapter_fd_handoff", header: "wayembed_adapters.h", bycopy
+  .} = object
+    size*: uint32
+    version*: uint32
+    format*: uint32
+    server*: ptr WayembedServer
+    client*: ptr WayembedClient
+    client_fd*: cint
+    format_token*: cstring
+    format_userdata*: pointer
+
   WayembedAdapterResize* {.
     importc: "wayembed_adapter_resize", header: "wayembed_adapters.h", bycopy
   .} = object
@@ -44,6 +56,18 @@ proc wayembed_adapter_handoff_init*(
 
 proc wayembed_adapter_handoff_validate*(
   handoff: ptr WayembedAdapterHandoff
+): bool {.cdecl, importc, header: "wayembed_adapters.h".}
+
+proc wayembed_adapter_fd_handoff_init*(
+  handoff: ptr WayembedAdapterFdHandoff,
+  format: uint32,
+  server: ptr WayembedServer,
+  client: ptr WayembedClient,
+  clientFd: cint,
+): bool {.cdecl, importc, header: "wayembed_adapters.h".}
+
+proc wayembed_adapter_fd_handoff_validate*(
+  handoff: ptr WayembedAdapterFdHandoff
 ): bool {.cdecl, importc, header: "wayembed_adapters.h".}
 
 proc wayembed_adapter_resize_validate*(

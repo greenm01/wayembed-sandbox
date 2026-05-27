@@ -425,6 +425,56 @@ proc runAbiSmoke(): int =
   if connectedCount != 2 or lastClient != fdClient:
     discard closeFd(clientFd)
     return fail(37, "fd client connection callback did not fire")
+
+  var fdHandoff =
+    WayembedAdapterFdHandoff(size: uint32(sizeof(WayembedAdapterFdHandoff)))
+  if wayembed_adapter_fd_handoff_validate(nil):
+    discard closeFd(clientFd)
+    return fail(45, "nil fd handoff validate succeeded")
+  if wayembed_adapter_fd_handoff_init(
+    addr fdHandoff, WayembedAdapterFormatClap, nil, nil, -1
+  ):
+    discard closeFd(clientFd)
+    return fail(46, "nil fd handoff init succeeded")
+  if not wayembed_adapter_fd_handoff_init(
+    addr fdHandoff, WayembedAdapterFormatClap, server, fdClient, clientFd
+  ):
+    discard closeFd(clientFd)
+    return fail(47, "CLAP fd handoff init failed")
+  if not wayembed_adapter_fd_handoff_validate(addr fdHandoff):
+    discard closeFd(clientFd)
+    return fail(48, "CLAP fd handoff validate failed")
+  if fdHandoff.client != fdClient or fdHandoff.client_fd != clientFd:
+    discard closeFd(clientFd)
+    return fail(49, "CLAP fd handoff payload mismatch")
+  if $fdHandoff.format_token != WayembedAdapterClapExperimentalApi:
+    discard closeFd(clientFd)
+    return fail(50, "unexpected CLAP fd token")
+  fdHandoff.format_token = WayembedAdapterLv2ExperimentalUri
+  if wayembed_adapter_fd_handoff_validate(addr fdHandoff):
+    discard closeFd(clientFd)
+    return fail(51, "mismatched fd adapter token accepted")
+  if not wayembed_adapter_fd_handoff_init(
+    addr fdHandoff, WayembedAdapterFormatLv2, server, fdClient, clientFd
+  ):
+    discard closeFd(clientFd)
+    return fail(52, "LV2 fd handoff init failed")
+  if not wayembed_adapter_fd_handoff_validate(addr fdHandoff):
+    discard closeFd(clientFd)
+    return fail(53, "LV2 fd handoff validate failed")
+  if not wayembed_adapter_fd_handoff_init(
+    addr fdHandoff, WayembedAdapterFormatVst3, server, fdClient, clientFd
+  ):
+    discard closeFd(clientFd)
+    return fail(54, "VST3 fd handoff init failed")
+  if not wayembed_adapter_fd_handoff_validate(addr fdHandoff):
+    discard closeFd(clientFd)
+    return fail(55, "VST3 fd handoff validate failed")
+  fdHandoff.version = WayembedAdapterAbiVersion + 1
+  if wayembed_adapter_fd_handoff_validate(addr fdHandoff):
+    discard closeFd(clientFd)
+    return fail(56, "future fd handoff version accepted")
+
   if not wayembed_server_close_client(server, fdClient):
     discard closeFd(clientFd)
     return fail(38, "close client by handle failed")
@@ -708,6 +758,88 @@ proc runAdapterCPluginSmoke(
   echo &"token={handoff.format_token} callbacks: connected={connectedCount} surface_created={surfaceCreatedCount} mapped={mappedCount} resized={resizedCount}"
   0
 
+proc runAdapterFdCPluginSmoke(
+    adapterFormat: uint32, expectedToken: string, label: string, failBase: int
+): int =
+  resetCounters()
+  var scenario = Scenario(attachStatus: WayembedEmbedStatusInvalidArgument)
+  try:
+    scenario.host = openHostSurface(420, 220)
+  except CatchableError as e:
+    return fail(failBase, e.msg)
+  defer:
+    closeHostSurface(scenario.host)
+
+  var hostIface = makeWaylandHostInterface(addr scenario)
+  let server = wayembed_server_create(addr hostIface, nil)
+  if server == nil:
+    return fail(failBase + 1, "wayembed_server_create failed")
+  defer:
+    wayembed_server_destroy(server)
+
+  var fdClient: ptr WayembedClient = nil
+  let clientFd = wayembed_server_open_client_fd(server, addr fdClient)
+  if clientFd < 0 or fdClient == nil:
+    return fail(failBase + 2, "open client fd failed")
+
+  var handoff = WayembedAdapterFdHandoff(size: uint32(sizeof(WayembedAdapterFdHandoff)))
+  if not wayembed_adapter_fd_handoff_init(
+    addr handoff, adapterFormat, server, fdClient, clientFd
+  ):
+    discard closeFd(clientFd)
+    return fail(failBase + 3, &"{label} fd handoff init failed")
+  if not wayembed_adapter_fd_handoff_validate(addr handoff):
+    discard closeFd(clientFd)
+    return fail(failBase + 4, &"{label} fd handoff validate failed")
+  if $handoff.format_token != expectedToken:
+    discard closeFd(clientFd)
+    return fail(failBase + 5, &"unexpected {label} fd token")
+
+  let display = wlclient.connect_display_to_fd(handoff.client_fd)
+  if display == nil:
+    discard closeFd(clientFd)
+    return fail(failBase + 6, "connect plugin display to fd failed")
+  defer:
+    wlclient.disconnect(display)
+    wayembed_server_dispatch(server)
+
+  pumpWayembedClient(server, display, scenario.host)
+  if connectedCount != 1 or lastClient != fdClient:
+    return fail(failBase + 7, "fd plugin client did not connect")
+
+  let fixture = wayembed_c_plugin_fixture_create(cast[ptr WlDisplay](display))
+  if fixture == nil:
+    return fail(failBase + 8, "C plugin fixture create failed")
+  defer:
+    wayembed_c_plugin_fixture_destroy(fixture)
+
+  pumpWayembedClient(server, display, scenario.host, 8)
+  if not wayembed_c_plugin_fixture_globals_ready(fixture):
+    return
+      fail(failBase + 9, "C plugin fixture did not receive compositor and shm globals")
+
+  if not wayembed_c_plugin_fixture_commit_surface(fixture):
+    return fail(failBase + 10, "C plugin fixture surface commit failed")
+  pumpWayembedClient(server, display, scenario.host, 10)
+
+  if surfaceCreatedCount != 1:
+    return fail(failBase + 11, "surface-created callback did not fire")
+  if scenario.attachStatus != WayembedEmbedStatusOk or scenario.embed == nil:
+    return
+      fail(failBase + 12, &"embed attach failed with status {scenario.attachStatus}")
+  if mappedCount != 1:
+    return fail(failBase + 13, "embed mapped callback did not fire")
+  if wayembed_embed_resize(scenario.embed, 240, 132) != WayembedEmbedStatusOk:
+    return fail(failBase + 14, "embed resize failed")
+  wayembed_server_dispatch(server)
+  if resizedCount != 1:
+    return fail(failBase + 15, "embed resized callback did not fire")
+
+  discard pumpHostSurface(scenario.host, 500)
+  echo &"{label.toLowerAscii()}-fd-c-plugin-smoke ok"
+  echo &"token={handoff.format_token} callbacks: connected={connectedCount} surface_created={surfaceCreatedCount} mapped={mappedCount} resized={resizedCount}"
+  0
+
 proc runClapCPluginSmoke(): int =
   runAdapterCPluginSmoke(
     WayembedAdapterFormatClap, WayembedAdapterClapExperimentalApi, "CLAP", 100
@@ -723,6 +855,22 @@ proc runVst3CPluginSmoke(): int =
     WayembedAdapterFormatVst3, WayembedAdapterVst3PlatformTypeWaylandSurfaceId, "VST3",
     160,
   )
+
+proc runAdapterFdCPluginSmoke(): int =
+  let smokes = [
+    (WayembedAdapterFormatClap, WayembedAdapterClapExperimentalApi, "CLAP", 180),
+    (WayembedAdapterFormatLv2, WayembedAdapterLv2ExperimentalUri, "LV2", 200),
+    (
+      WayembedAdapterFormatVst3, WayembedAdapterVst3PlatformTypeWaylandSurfaceId,
+      "VST3", 220,
+    ),
+  ]
+  for smoke in smokes:
+    let code = runAdapterFdCPluginSmoke(smoke[0], smoke[1], smoke[2], smoke[3])
+    if code != 0:
+      return code
+  echo "adapter-fd-c-plugin-smoke ok"
+  0
 
 proc runLv2OrderSmoke(): int =
   resetCounters()
@@ -830,7 +978,7 @@ proc runVst3OrderSmoke(): int =
 
 proc usage(): int =
   stderr.writeLine(
-    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|fd-embed-smoke|clap-order-smoke|clap-c-plugin-smoke|lv2-order-smoke|lv2-c-plugin-smoke|vst3-order-smoke|vst3-c-plugin-smoke>"
+    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|fd-embed-smoke|clap-order-smoke|clap-c-plugin-smoke|lv2-order-smoke|lv2-c-plugin-smoke|vst3-order-smoke|vst3-c-plugin-smoke|adapter-fd-c-plugin-smoke>"
   )
   64
 
@@ -860,6 +1008,8 @@ when isMainModule:
         runVst3OrderSmoke()
       of "vst3-c-plugin-smoke":
         runVst3CPluginSmoke()
+      of "adapter-fd-c-plugin-smoke":
+        runAdapterFdCPluginSmoke()
       else:
         usage()
   quit code
