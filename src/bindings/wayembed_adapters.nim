@@ -4,9 +4,11 @@ const
   WayembedAdapterAbiVersion* = 1'u32
   WayembedAdapterClapExperimentalApi* = "wayembed.experimental.clap.wayland"
   WayembedAdapterLv2ExperimentalUri* = "https://wayembed.org/ns/ext/wayland-ui"
+  WayembedAdapterVst3PlatformTypeWaylandSurfaceId* = "WaylandSurfaceID"
   WayembedAdapterFormatUnknown* = 0'u32
   WayembedAdapterFormatClap* = 1'u32
   WayembedAdapterFormatLv2* = 2'u32
+  WayembedAdapterFormatVst3* = 3'u32
 
 type
   WayembedAdapterHandoff* {.
