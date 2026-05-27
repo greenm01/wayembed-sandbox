@@ -514,6 +514,71 @@ proc runEmbedSmoke(): int =
   echo &"callbacks: connected={connectedCount} surface_created={surfaceCreatedCount} mapped={mappedCount} resized={resizedCount}"
   0
 
+proc runFdEmbedSmoke(): int =
+  resetCounters()
+  var scenario = Scenario(attachStatus: WayembedEmbedStatusInvalidArgument)
+  try:
+    scenario.host = openHostSurface(420, 220)
+  except CatchableError as e:
+    return fail(140, e.msg)
+  defer:
+    closeHostSurface(scenario.host)
+
+  var hostIface = makeWaylandHostInterface(addr scenario)
+  let server = wayembed_server_create(addr hostIface, nil)
+  if server == nil:
+    return fail(141, "wayembed_server_create failed")
+  defer:
+    wayembed_server_destroy(server)
+
+  var fdClient: ptr WayembedClient = nil
+  let clientFd = wayembed_server_open_client_fd(server, addr fdClient)
+  if clientFd < 0 or fdClient == nil:
+    return fail(142, "open client fd failed")
+
+  let display = wlclient.connect_display_to_fd(clientFd)
+  if display == nil:
+    discard closeFd(clientFd)
+    return fail(143, "connect plugin display to fd failed")
+  defer:
+    wlclient.disconnect(display)
+    wayembed_server_dispatch(server)
+
+  pumpWayembedClient(server, display, scenario.host)
+  if connectedCount != 1 or lastClient != fdClient:
+    return fail(144, "fd plugin client did not connect")
+
+  var globals = PluginGlobals()
+  globals.registry = wl.getRegistry(display)
+  discard wl.addListener(globals.registry, addr pluginRegistryListener, addr globals)
+  pumpWayembedClient(server, display, scenario.host, 8)
+  if globals.compositor == nil or globals.shm == nil:
+    return fail(145, "fd plugin did not receive compositor and shm globals")
+
+  let surface = wl.createSurface(globals.compositor)
+  if surface == nil:
+    return fail(146, "fd plugin surface creation failed")
+  pumpWayembedClient(server, display, scenario.host, 8)
+  if surfaceCreatedCount != 1:
+    return fail(147, "fd surface-created callback did not fire")
+  if scenario.attachStatus != WayembedEmbedStatusOk or scenario.embed == nil:
+    return fail(148, &"fd embed attach failed with status {scenario.attachStatus}")
+  if not drawPluginSurface(globals, surface):
+    return fail(149, "fd plugin buffer draw failed")
+  pumpWayembedClient(server, display, scenario.host, 10)
+  if mappedCount != 1:
+    return fail(150, "fd embed mapped callback did not fire")
+  if wayembed_embed_resize(scenario.embed, 220, 128) != WayembedEmbedStatusOk:
+    return fail(151, "fd embed resize failed")
+  wayembed_server_dispatch(server)
+  if resizedCount != 1:
+    return fail(152, "fd embed resized callback did not fire")
+
+  discard pumpHostSurface(scenario.host, 500)
+  echo "fd-embed-smoke ok"
+  echo &"callbacks: connected={connectedCount} surface_created={surfaceCreatedCount} mapped={mappedCount} resized={resizedCount}"
+  0
+
 proc runClapOrderSmoke(): int =
   resetCounters()
   var host = makeHostInterface()
@@ -688,7 +753,7 @@ proc runLv2OrderSmoke(): int =
 
 proc usage(): int =
   stderr.writeLine(
-    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|clap-order-smoke|clap-c-plugin-smoke|lv2-order-smoke|lv2-c-plugin-smoke>"
+    "usage: wayembed-sandbox <abi-smoke|host-surface|embed-smoke|fd-embed-smoke|clap-order-smoke|clap-c-plugin-smoke|lv2-order-smoke|lv2-c-plugin-smoke>"
   )
   64
 
@@ -704,6 +769,8 @@ when isMainModule:
         runHostSurface()
       of "embed-smoke":
         runEmbedSmoke()
+      of "fd-embed-smoke":
+        runFdEmbedSmoke()
       of "clap-order-smoke":
         runClapOrderSmoke()
       of "clap-c-plugin-smoke":
