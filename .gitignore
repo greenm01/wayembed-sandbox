@@ -1,5 +1,27 @@
-bin/
-build/
-nimcache/
+# Binaries
+/bin/
+
+# Nim cache
+/.nimcache/
+/nimcache/
+/src/.nimcache/
+/src/nimcache/
+/build/
+
+# User-specific
 .nimble/
+
+# Local smoke-test logs
 *.log
+/wayembed-sandbox.log
+
+# System / Editor
+.DS_Store
+*~
+*.swp
+.idea/
+.vscode/
+nimble.develop
+nimble.paths
+config.nims
+nimbledeps

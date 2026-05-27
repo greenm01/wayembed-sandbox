@@ -26,7 +26,7 @@ Then build the sandbox:
 
 ```sh
 cd /home/niltempus/dev/wayembed-sandbox
-nim c --hints:off -o:bin/wayembed-sandbox src/wayembed_sandbox.nim
+nimble c --hints:off -o:bin/wayembed-sandbox src/wayembed_sandbox.nim
 ```
 
 ## Commands
@@ -38,5 +38,13 @@ bin/wayembed-sandbox embed-smoke
 bin/wayembed-sandbox clap-order-smoke
 ```
 
-`abi-smoke` is the first runnable proof. The other commands are placeholders
-for the next milestones.
+`abi-smoke` checks the C ABI from Nim. `host-surface` opens a live Wayland
+parent window. `embed-smoke` creates one plugin surface and embeds it through
+wayembed. `clap-order-smoke` validates the experimental CLAP handoff order
+without loading a real plugin.
+
+Before committing Nim changes, run the semantic check last:
+
+```sh
+nimble checkSources
+```
