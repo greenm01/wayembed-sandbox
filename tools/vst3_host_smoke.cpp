@@ -577,13 +577,9 @@ int main(int argc, char **argv)
 
     wl_proxy *parentProxy = wayembed_server_create_proxy(
         scenario.server, pluginDisplay, reinterpret_cast<wl_proxy *>(host.surface));
-    if (!parentProxy) {
-        std::fprintf(stderr,
-                     "wayembed-vst3-host-smoke: parent proxy unavailable; using "
-                     "controlled nilamp smoke parent\n");
-    }
-    void *parentForPlugin = parentProxy ? static_cast<void *>(parentProxy) :
-                                          static_cast<void *>(host.surface);
+    check(parentProxy != nullptr, "failed to create plugin-display parent proxy");
+    check(wl_proxy_get_display(parentProxy) == pluginDisplay,
+          "parent proxy is not on the plugin display");
 
     const std::string libraryPath =
         pluginPath + "/Contents/x86_64-linux/nilamp-twd-mkii.so";
@@ -627,7 +623,7 @@ int main(int argc, char **argv)
 
     PlugFrame frame(host.surface, parentProxy);
     check(view->setFrame(&frame) == kResultOk, "setFrame failed");
-    check(view->attached(parentForPlugin, kPlatformTypeWaylandSurfaceID) == kResultOk,
+    check(view->attached(parentProxy, kPlatformTypeWaylandSurfaceID) == kResultOk,
           "WaylandSurfaceID attach failed");
     pump(scenario, pluginDisplay, 1000);
 
@@ -641,6 +637,7 @@ int main(int argc, char **argv)
     check(scenario.resized >= 1, "embed resize callback did not fire");
 
     check(view->removed() == kResultOk, "view removed failed");
+    wayembed_server_destroy_proxy(scenario.server, parentProxy);
     view->release();
     controller->terminate();
     controller->release();

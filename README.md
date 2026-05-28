@@ -58,9 +58,9 @@ through fd-backed CLAP, LV2, and VST3 handoffs.
 
 `wayembed-vst3-host-smoke` is a real VST3 host spike. It loads nilamp's VST3
 bundle by default, exposes `IWaylandHost`, passes `WaylandSurfaceID`, and embeds
-the plugin-created child surface through `wayembed`. It uses nilamp's controlled
-smoke editor until `wayembed_server_create_proxy()` can provide a strict
-plugin-display parent surface proxy. Override the plugin bundle with
+the plugin-created child surface through `wayembed`. The parent passed to
+`IPlugView::attached()` is a strict plugin-display proxy created with
+`wayembed_server_create_proxy()`. Override the plugin bundle with
 `WAYEMBED_VST3_PLUGIN` or by passing the bundle path as the first argument.
 
 Before committing Nim changes, run the semantic check last:
