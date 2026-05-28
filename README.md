@@ -1,16 +1,11 @@
 # wayembed-sandbox
 
-A small Nim test platform for `wayembed`.
+`wayembed-sandbox` is a small Nim program for trying `wayembed` from outside C.
 
-It proves the public C ABI from a non-C host, opens a live Wayland parent
-surface, and embeds plugin-created surfaces through `wayembed`.
-
-## Layout
-
-- `src/bindings/wayembed.nim` mirrors `wayembed.h`.
-- `src/bindings/wayembed_adapters.nim` mirrors `wayembed_adapters.h`.
-- `src/wayembed_sandbox.nim` provides the command runner.
-- `fixtures/c/` contains tiny C Wayland plugin fixtures.
+It opens Wayland windows, loads tiny plugin fixtures, and checks that embedded
+plugin surfaces end up where the host expects them. The point is not to be a
+full host. It is a quick place to catch ABI mistakes, adapter-order bugs, and
+broken Wayland handoffs while `wayembed` is changing.
 
 ## Build
 
@@ -28,7 +23,9 @@ cd /home/niltempus/dev/wayembed-sandbox
 nimble c --hints:off -o:bin/wayembed-sandbox src/wayembed_sandbox.nim
 ```
 
-## Commands
+## Run
+
+Most checks run through the sandbox binary:
 
 ```sh
 bin/wayembed-sandbox abi-smoke
@@ -42,28 +39,19 @@ bin/wayembed-sandbox lv2-c-plugin-smoke
 bin/wayembed-sandbox vst3-order-smoke
 bin/wayembed-sandbox vst3-c-plugin-smoke
 bin/wayembed-sandbox adapter-fd-c-plugin-smoke
+```
+
+There is also a VST3 host smoke test:
+
+```sh
 make vst3-host-smoke
 bin/wayembed-vst3-host-smoke
 ```
 
-`abi-smoke` checks the C ABI from Nim. `host-surface` opens a live Wayland
-parent window. `embed-smoke` creates one plugin surface and embeds it through
-wayembed. `fd-embed-smoke` runs the same embedded surface path through a raw
-client fd. `clap-order-smoke`, `lv2-order-smoke`, and `vst3-order-smoke`
-validate the experimental adapter handoff order without loading a real plugin.
-`clap-c-plugin-smoke`, `lv2-c-plugin-smoke`, and `vst3-c-plugin-smoke` pass the
-adapter handoff display into a tiny C plugin fixture and embed the
-fixture-created surface. `adapter-fd-c-plugin-smoke` repeats that fixture path
-through fd-backed CLAP, LV2, and VST3 handoffs.
+It loads nilamp's VST3 bundle by default. Set `WAYEMBED_VST3_PLUGIN`, or pass a
+bundle path as the first argument, to try another plugin.
 
-`wayembed-vst3-host-smoke` is a real VST3 host spike. It loads nilamp's VST3
-bundle by default, exposes `IWaylandHost`, passes `WaylandSurfaceID`, and embeds
-the plugin-created child surface through `wayembed`. The parent passed to
-`IPlugView::attached()` is a strict plugin-display proxy created with
-`wayembed_server_create_proxy()`. Override the plugin bundle with
-`WAYEMBED_VST3_PLUGIN` or by passing the bundle path as the first argument.
-
-Before committing Nim changes, run the semantic check last:
+Before committing Nim changes, run:
 
 ```sh
 nimble checkSources
