@@ -264,7 +264,7 @@ struct Scenario {
     wayembed_client *client = nullptr;
     wayembed_embed *embed = nullptr;
     wl_surface *child = nullptr;
-    uint32_t attachStatus = WAYEMBED_EMBED_STATUS_INVALID_ARGUMENT;
+    uint32_t adoptStatus = WAYEMBED_EMBED_STATUS_INVALID_ARGUMENT;
     int connected = 0;
     int closed = 0;
     int surfaceCreated = 0;
@@ -309,14 +309,8 @@ static void onSurfaceCreated(void *userdata, wayembed_client *client,
 {
     Scenario *scenario = static_cast<Scenario *>(userdata);
     scenario->surfaceCreated++;
+    scenario->client = client;
     scenario->child = pluginChildSurface;
-    wayembed_embed_attach_info info = {};
-    info.size = sizeof(info);
-    info.version = WAYEMBED_ABI_VERSION;
-    info.client = client;
-    info.parent_surface = scenario->host->surface;
-    info.child_surface = pluginChildSurface;
-    scenario->attachStatus = wayembed_embed_attach(&info, &scenario->embed);
 }
 
 static void onEmbedMapped(void *userdata, wayembed_embed *embed)
@@ -545,6 +539,38 @@ static void pump(Scenario &scenario, wl_display *pluginDisplay, int durationMs)
     }
 }
 
+static uint32_t tryAdoptSubsurface(Scenario &scenario)
+{
+    wayembed_embed_attach_info info = {};
+    info.size = sizeof(info);
+    info.version = WAYEMBED_ABI_VERSION;
+    info.client = scenario.client;
+    info.parent_surface = scenario.host->surface;
+    info.child_surface = scenario.child;
+    scenario.adoptStatus = wayembed_embed_adopt_subsurface(&info, &scenario.embed);
+    return scenario.adoptStatus;
+}
+
+static void waitForAdoptedSubsurface(Scenario &scenario, wl_display *pluginDisplay,
+                                     int timeoutMs)
+{
+    int remaining = timeoutMs;
+    while (remaining > 0 && !scenario.host->closed && !scenario.embed) {
+        pump(scenario, pluginDisplay, 20);
+        remaining -= 20;
+        if (scenario.client && scenario.child) {
+            const uint32_t status = tryAdoptSubsurface(scenario);
+            if (status == WAYEMBED_EMBED_STATUS_OK) {
+                pump(scenario, pluginDisplay, 20);
+                return;
+            }
+            if (status != WAYEMBED_EMBED_STATUS_UNKNOWN_SURFACE) {
+                return;
+            }
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     const std::string pluginPath = argc > 1 ? argv[1] : defaultPluginPath();
@@ -625,10 +651,11 @@ int main(int argc, char **argv)
     check(view->setFrame(&frame) == kResultOk, "setFrame failed");
     check(view->attached(parentProxy, kPlatformTypeWaylandSurfaceID) == kResultOk,
           "WaylandSurfaceID attach failed");
-    pump(scenario, pluginDisplay, 1000);
+    waitForAdoptedSubsurface(scenario, pluginDisplay, 1000);
 
     check(scenario.surfaceCreated == 1, "plugin child surface was not created");
-    check(scenario.attachStatus == WAYEMBED_EMBED_STATUS_OK, "wayembed embed attach failed");
+    check(scenario.adoptStatus == WAYEMBED_EMBED_STATUS_OK,
+          "wayembed embed adopt subsurface failed");
     check(scenario.embed != nullptr, "wayembed embed handle missing");
     check(scenario.mapped >= 1, "embedded surface did not map");
     check(wayembed_embed_resize(scenario.embed, 640, 360) == WAYEMBED_EMBED_STATUS_OK,

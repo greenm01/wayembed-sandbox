@@ -221,6 +221,10 @@ proc wayembed_embed_attach*(
   info: ptr WayembedEmbedAttachInfo, out_embed: ptr ptr WayembedEmbed
 ): uint32 {.cdecl, importc, header: "wayembed.h".}
 
+proc wayembed_embed_adopt_subsurface*(
+  info: ptr WayembedEmbedAttachInfo, out_embed: ptr ptr WayembedEmbed
+): uint32 {.cdecl, importc, header: "wayembed.h".}
+
 proc wayembed_embed_resize*(
   embed: ptr WayembedEmbed, width: int32, height: int32
 ): uint32 {.cdecl, importc, header: "wayembed.h".}
