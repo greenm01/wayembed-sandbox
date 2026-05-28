@@ -42,6 +42,8 @@ bin/wayembed-sandbox lv2-c-plugin-smoke
 bin/wayembed-sandbox vst3-order-smoke
 bin/wayembed-sandbox vst3-c-plugin-smoke
 bin/wayembed-sandbox adapter-fd-c-plugin-smoke
+make vst3-host-smoke
+bin/wayembed-vst3-host-smoke
 ```
 
 `abi-smoke` checks the C ABI from Nim. `host-surface` opens a live Wayland
@@ -53,6 +55,13 @@ validate the experimental adapter handoff order without loading a real plugin.
 adapter handoff display into a tiny C plugin fixture and embed the
 fixture-created surface. `adapter-fd-c-plugin-smoke` repeats that fixture path
 through fd-backed CLAP, LV2, and VST3 handoffs.
+
+`wayembed-vst3-host-smoke` is a real VST3 host spike. It loads nilamp's VST3
+bundle by default, exposes `IWaylandHost`, passes `WaylandSurfaceID`, and embeds
+the plugin-created child surface through `wayembed`. It uses nilamp's controlled
+smoke editor until `wayembed_server_create_proxy()` can provide a strict
+plugin-display parent surface proxy. Override the plugin bundle with
+`WAYEMBED_VST3_PLUGIN` or by passing the bundle path as the first argument.
 
 Before committing Nim changes, run the semantic check last:
 
